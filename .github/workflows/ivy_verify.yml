@@ -28,6 +28,12 @@ jobs:
           cp src/bin/psql/tmp_check/log/regress_log_040_prompt fixed-prompt-detail.log
           test "$fixed_status" -ne 0
           grep 'timeout on timer' fixed-prompt.log
+          set +e
+          make -C contrib/xml2 check > fixed-xml2.log 2>&1
+          xml_status=$?
+          set -e
+          test "$xml_status" -ne 0
+          cp contrib/xml2/regression.diffs fixed-xml2.diffs
           git fetch --depth=1 origin 83594b3f4663f07508e212559a3b12d18823d685
           git show FETCH_HEAD:src/interfaces/libpq/ivy-exec.c > src/interfaces/libpq/ivy-exec.c
           make -C src/interfaces/libpq -j4 > baseline-build.log 2>&1
@@ -38,6 +44,14 @@ jobs:
           cp src/bin/psql/tmp_check/log/regress_log_040_prompt baseline-prompt-detail.log
           test "$baseline_status" -ne 0
           grep 'timeout on timer' baseline-prompt.log
+          set +e
+          make -C contrib/xml2 check > baseline-xml2.log 2>&1
+          xml_status=$?
+          set -e
+          test "$xml_status" -ne 0
+          cp contrib/xml2/regression.diffs baseline-xml2.diffs
+          diff -u <(sed '/^--- /d; /^+++ /d' fixed-xml2.diffs) <(sed '/^--- /d; /^+++ /d' baseline-xml2.diffs)
+          echo "Baseline and fixed XML2 regression differences are identical."
           echo "Fixed and baseline prompt tests both fail with the same timeout."
       - name: Verify restored fix and new test formatting
         run: |
@@ -63,4 +77,6 @@ jobs:
           name: baseline-comparison-logs
           path: |
             *.log
+            *.diffs
             src/bin/psql/tmp_check/log/**
+
