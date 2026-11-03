@@ -17,12 +17,20 @@ foreach my $api ('legacy', 'typed')
 		['null', 'rows=1 indicator=-1 value=null'],
 		['value', 'rows=1 indicator=0 value=returned'])
 	{
-		$node->command_checks_all(
+		my ($stdout, $stderr) = run_command(
 			['libpq_testclient', '--ivy-out', $node->connstr('postgres'),
-				$api, $case->[0]],
-			0, [qr/^\Q$case->[1]\E$/m], [],
-			"$api OUT binding with $case->[0] result");
+				$api, $case->[0]]);
+		is($?, 0, "$api $case->[0] exits normally");
+		is($stdout, $case->[1], "$api $case->[0] OUT value and indicator");
+		is($stderr, '', "$api $case->[0] has no diagnostics");
 	}
 }
+
+# An empty result must not null an input binding with no matching OUT column.
+$node->command_checks_all(
+	['libpq_testclient', '--ivy-out', $node->connstr('postgres'),
+		'typed', 'unbound'],
+	0, [qr/^rows=0 indicator=0 value=unbound$/m], [],
+	'input-only binding is unchanged by an empty result');
 
 done_testing();

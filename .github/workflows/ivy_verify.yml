@@ -5,30 +5,66 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
+    timeout-minutes: 55
     steps:
       - uses: actions/checkout@v4
       - name: Dependencies
-        run: sudo apt-get update -qq && sudo apt-get install -y build-essential bison flex libxml2-dev libipc-run-perl uuid-dev
+        run: sudo apt-get update -qq && sudo apt-get install -y build-essential bison flex libxml2-dev libipc-run-perl uuid-dev meson ninja-build
       - name: Build
         run: |
           ./configure --prefix="$PWD/inst" --enable-cassert --enable-debug --enable-tap-tests --without-icu --without-readline --with-libxml --with-uuid=e2fs --without-zstd --without-lz4 > configure.log 2>&1
           make -j4 > build.log 2>&1
           make install > install.log 2>&1
-      - name: Ivy OUT regression
-        run: make -C src/interfaces/libpq check PROVE_TESTS=t/007_ivy_out.pl
+      - name: Confirm both baseline crashes
+        run: |
+          cp src/interfaces/libpq/ivy-exec.c "$RUNNER_TEMP/ivy-fixed.c"
+          git fetch --depth=1 origin 83594b3f46
+          git show FETCH_HEAD:src/interfaces/libpq/ivy-exec.c > src/interfaces/libpq/ivy-exec.c
+          make -C src/interfaces/libpq -j4 > baseline-build.log 2>&1
+          set +e
+          make -C src/interfaces/libpq check PROVE_TESTS=t/007_ivy_out.pl > baseline-test.log 2>&1
+          status=$?
+          set -e
+          cat baseline-test.log
+          test "$status" -ne 0
+          grep -E 'got: (11|139)' baseline-test.log
+          cp "$RUNNER_TEMP/ivy-fixed.c" src/interfaces/libpq/ivy-exec.c
+      - name: Fixed Ivy OUT regression
+        run: make -C src/interfaces/libpq check PROVE_TESTS=t/007_ivy_out.pl PROVE_FLAGS=--verbose > fixed-test.log 2>&1 || { cat fixed-test.log; exit 1; }
+      - name: PostgreSQL check-world
+        if: success()
+        continue-on-error: true
+        run: make -j4 check-world > check-world.log 2>&1
+      - name: Installed regression suites
+        if: success()
+        continue-on-error: true
+        run: |
+          make -j4 world-bin > world-build.log 2>&1
+          make install-world-bin > world-install.log 2>&1
+          export PATH="$PWD/inst/bin:$PATH"
+          export LD_LIBRARY_PATH="$PWD/inst/lib"
+          export PGPORT=65432
+          initdb -D "$RUNNER_TEMP/ivy-pgdata" -A trust -m pg > initdb.log 2>&1
+          pg_ctl -D "$RUNNER_TEMP/ivy-pgdata" -l "$RUNNER_TEMP/ivy-postmaster.log" -o '-p 65432 -k /tmp' start
+          trap 'pg_ctl -D "$RUNNER_TEMP/ivy-pgdata" -m immediate stop' EXIT
+          make -j4 installcheck-world > installcheck-world.log 2>&1
+      - name: Formatting diagnostics
+        if: always()
+        continue-on-error: true
+        run: |
+          make -C src/tools/pg_bsd_indent
+          export PGINDENT="$PWD/src/tools/pg_bsd_indent/pg_bsd_indent"
+          src/tools/pgindent/pgindent --diff src/interfaces/libpq/test/libpq_testclient.c > testclient-format.patch
+          src/tools/pgindent/pgindent --diff src/interfaces/libpq/ivy-exec.c > ivy-format.patch
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: verification-logs
           path: |
-            configure.log
-            build.log
-            install.log
-            config.log
+            *.log
+            *-format.patch
             **/regression.diffs
             **/regression.out
             **/tmp_check/log/**
             **/tmp_check/logs/**
             **/tmp_check/portlock/**
-

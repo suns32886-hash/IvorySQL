@@ -35,16 +35,23 @@ test_ivy_out(const char *conninfo, const char *api, const char *input)
 	if (Ivystatus(conn) != CONNECTION_OK)
 		goto done;
 	strlcpy(buffer, input, sizeof(buffer));
+	if (strcmp(input, "unbound") == 0)
+		query = "SELECT $1::text AS ordinary WHERE false";
 
 	if (strcmp(api, "typed") == 0)
 	{
+		HostVariableEntry entry = {"$1", 1};
+		HostVariable host = {0};
+
+		host.hostvars = &entry;
+		host.length = 1;
 		if (!IvyHandleAlloc(NULL, (void **) &stmt, IVY_HANDLE_STMT, 0, NULL) ||
 			!IvyHandleAlloc(NULL, (void **) &error, IVY_HANDLE_ERROR, 0, NULL) ||
 			!IvyStmtPrepare(stmt, error, query, strlen(query), 0, 0) ||
 			!IvyBindByPos(stmt, &bind, error, 1, buffer, sizeof(buffer),
 						 25 | 0x20000000, &indicator, NULL, NULL, 0, NULL, 0))
 			goto done;
-		result = IvyStmtExecute(conn, stmt, error);
+		result = IvyStmtExecute2(conn, stmt, error, &host);
 	}
 	else
 	{
@@ -99,6 +106,6 @@ main(int argc, char *argv[])
 		return 0;
 	}
 
-	printf("currently only --ssl is supported\n");
+	printf("supported options: --ssl, --ivy-out CONNINFO API INPUT\n");
 	return 1;
 }
