@@ -18,7 +18,7 @@ jobs:
       - name: Confirm both baseline crashes
         run: |
           cp src/interfaces/libpq/ivy-exec.c "$RUNNER_TEMP/ivy-fixed.c"
-          git fetch --depth=1 origin 83594b3f46
+          git fetch --depth=1 origin 83594b3f4663f07508e212559a3b12d18823d685
           git show FETCH_HEAD:src/interfaces/libpq/ivy-exec.c > src/interfaces/libpq/ivy-exec.c
           make -C src/interfaces/libpq -j4 > baseline-build.log 2>&1
           set +e
@@ -68,3 +68,23 @@ jobs:
             **/tmp_check/log/**
             **/tmp_check/logs/**
             **/tmp_check/portlock/**
+  meson:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dependencies
+        run: sudo apt-get update -qq && sudo apt-get install -y build-essential bison flex libxml2-dev libipc-run-perl uuid-dev meson ninja-build
+      - name: Meson build
+        run: |
+          meson setup meson-build --auto-features=disabled -Dtap_tests=enabled -Duuid=e2fs -Dlibxml=enabled > meson-setup.log 2>&1
+          ninja -C meson-build -j4 > meson-build.log 2>&1
+      - name: Meson libpq suites
+        run: meson test -C meson-build --suite libpq --print-errorlogs > meson-test.log 2>&1 || { cat meson-test.log; exit 1; }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: meson-logs
+          path: |
+            meson-*.log
+            meson-build/meson-logs/**
