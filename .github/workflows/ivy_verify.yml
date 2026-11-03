@@ -9,10 +9,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Dependencies
-        run: sudo apt-get update -qq && sudo apt-get install -y build-essential bison flex libxml2-dev libipc-run-perl
+        run: sudo apt-get update -qq && sudo apt-get install -y build-essential bison flex libxml2-dev libipc-run-perl uuid-dev
       - name: Build
         run: |
-          ./configure --prefix="$PWD/inst" --enable-cassert --enable-debug --enable-tap-tests --without-icu --without-readline --with-libxml --without-zstd --without-lz4 > configure.log 2>&1
+          ./configure --prefix="$PWD/inst" --enable-cassert --enable-debug --enable-tap-tests --without-icu --without-readline --with-libxml --with-uuid=e2fs --without-zstd --without-lz4 > configure.log 2>&1
           make -j4 > build.log 2>&1
           make install > install.log 2>&1
       - name: Ivy OUT regression
@@ -31,3 +31,4 @@ jobs:
             **/tmp_check/log/**
             **/tmp_check/logs/**
             **/tmp_check/portlock/**
+
