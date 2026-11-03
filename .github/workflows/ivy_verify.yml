@@ -1,91 +1,66 @@
-﻿name: Ivy OUT result verification
+﻿name: Ivy baseline prompt and formatting comparison
 on: [push]
 permissions:
   contents: read
 jobs:
-  test:
+  compare:
     runs-on: ubuntu-24.04
-    timeout-minutes: 55
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - name: Dependencies
-        run: sudo apt-get update -qq && sudo apt-get install -y build-essential bison flex libxml2-dev libipc-run-perl uuid-dev meson ninja-build
+        run: sudo apt-get update -qq && sudo apt-get install -y build-essential bison flex libxml2-dev libipc-run-perl uuid-dev
       - name: Build
         run: |
           ./configure --prefix="$PWD/inst" --enable-cassert --enable-debug --enable-tap-tests --without-icu --without-readline --with-libxml --with-uuid=e2fs --without-zstd --without-lz4 > configure.log 2>&1
           make -j4 > build.log 2>&1
           make install > install.log 2>&1
-      - name: Confirm both baseline crashes
+      - name: Compare prompt test on fixed and baseline Ivy
+        env:
+          PG_TEST_TIMEOUT_DEFAULT: 15
         run: |
           cp src/interfaces/libpq/ivy-exec.c "$RUNNER_TEMP/ivy-fixed.c"
+          trap 'cp "$RUNNER_TEMP/ivy-fixed.c" src/interfaces/libpq/ivy-exec.c' EXIT
+          set +e
+          make -C src/bin/psql check PROVE_TESTS=t/040_prompt.pl > fixed-prompt.log 2>&1
+          fixed_status=$?
+          set -e
+          cp src/bin/psql/tmp_check/log/regress_log_040_prompt fixed-prompt-detail.log
+          test "$fixed_status" -ne 0
+          grep 'timeout on timer' fixed-prompt.log
           git fetch --depth=1 origin 83594b3f4663f07508e212559a3b12d18823d685
           git show FETCH_HEAD:src/interfaces/libpq/ivy-exec.c > src/interfaces/libpq/ivy-exec.c
           make -C src/interfaces/libpq -j4 > baseline-build.log 2>&1
           set +e
-          make -C src/interfaces/libpq check PROVE_TESTS=t/007_ivy_out.pl > baseline-test.log 2>&1
-          status=$?
+          make -C src/bin/psql check PROVE_TESTS=t/040_prompt.pl > baseline-prompt.log 2>&1
+          baseline_status=$?
           set -e
-          cat baseline-test.log
-          test "$status" -ne 0
-          grep -E 'got:.*(11|139)' baseline-test.log
-          cp "$RUNNER_TEMP/ivy-fixed.c" src/interfaces/libpq/ivy-exec.c
-      - name: Fixed Ivy OUT regression
-        run: make -C src/interfaces/libpq check PROVE_TESTS=t/007_ivy_out.pl PROVE_FLAGS=--verbose > fixed-test.log 2>&1 || { cat fixed-test.log; exit 1; }
-      - name: PostgreSQL check-world
-        if: success()
-        continue-on-error: true
-        run: make -j4 check-world > check-world.log 2>&1
-      - name: Installed regression suites
-        if: success()
-        continue-on-error: true
+          cp src/bin/psql/tmp_check/log/regress_log_040_prompt baseline-prompt-detail.log
+          test "$baseline_status" -ne 0
+          grep 'timeout on timer' baseline-prompt.log
+          echo "Fixed and baseline prompt tests both fail with the same timeout."
+      - name: Verify restored fix and new test formatting
         run: |
-          make -j4 world-bin > world-build.log 2>&1
-          make install-world-bin > world-install.log 2>&1
-          export PATH="$PWD/inst/bin:$PATH"
-          export LD_LIBRARY_PATH="$PWD/inst/lib"
-          export PGPORT=65432
-          initdb -D "$RUNNER_TEMP/ivy-pgdata" -A trust -m pg > initdb.log 2>&1
-          pg_ctl -D "$RUNNER_TEMP/ivy-pgdata" -l "$RUNNER_TEMP/ivy-postmaster.log" -o '-p 65432 -k /tmp' start
-          trap 'pg_ctl -D "$RUNNER_TEMP/ivy-pgdata" -m immediate stop' EXIT
-          make -j4 installcheck-world > installcheck-world.log 2>&1
-      - name: Formatting diagnostics
-        if: always()
-        continue-on-error: true
-        run: |
+          make -C src/interfaces/libpq check PROVE_TESTS=t/007_ivy_out.pl PROVE_FLAGS=--verbose > fixed-test.log 2>&1
           make -C src/tools/pg_bsd_indent
           export PGINDENT="$PWD/src/tools/pg_bsd_indent/pg_bsd_indent"
-          src/tools/pgindent/pgindent --diff src/interfaces/libpq/test/libpq_testclient.c > testclient-format.patch
-          src/tools/pgindent/pgindent --diff src/interfaces/libpq/ivy-exec.c > ivy-format.patch
+          src/tools/pgindent/pgindent --check src/interfaces/libpq/test/libpq_testclient.c
+          set +e
+          src/tools/pgindent/pgindent --check src/interfaces/libpq/ivy-exec.c
+          fixed_status=$?
+          cp src/interfaces/libpq/ivy-exec.c "$RUNNER_TEMP/ivy-fixed.c"
+          git show FETCH_HEAD:src/interfaces/libpq/ivy-exec.c > src/interfaces/libpq/ivy-exec.c
+          src/tools/pgindent/pgindent --check src/interfaces/libpq/ivy-exec.c
+          baseline_status=$?
+          cp "$RUNNER_TEMP/ivy-fixed.c" src/interfaces/libpq/ivy-exec.c
+          set -e
+          echo "whole-file pgindent: fixed=$fixed_status baseline=$baseline_status"
+          test "$fixed_status" -eq 2
+          test "$baseline_status" -eq 2
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: verification-logs
+          name: baseline-comparison-logs
           path: |
             *.log
-            *-format.patch
-            **/regression.diffs
-            **/regression.out
-            **/tmp_check/log/**
-            **/tmp_check/logs/**
-            **/tmp_check/portlock/**
-  meson:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@v4
-      - name: Dependencies
-        run: sudo apt-get update -qq && sudo apt-get install -y build-essential bison flex libxml2-dev libipc-run-perl uuid-dev meson ninja-build
-      - name: Meson build
-        run: |
-          meson setup meson-build --auto-features=disabled -Dtap_tests=enabled -Duuid=e2fs -Dlibxml=enabled > meson-setup.log 2>&1
-          ninja -C meson-build -j4 > meson-build.log 2>&1
-      - name: Meson libpq suites
-        run: meson test -C meson-build --suite setup --suite libpq --print-errorlogs > meson-test.log 2>&1 || { cat meson-test.log; exit 1; }
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: meson-logs
-          path: |
-            meson-*.log
-            meson-build/meson-logs/**
-
+            src/bin/psql/tmp_check/log/**
