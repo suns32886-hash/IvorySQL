@@ -1,0 +1,33 @@
+﻿name: Ivy OUT result verification
+on: [push]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dependencies
+        run: sudo apt-get update -qq && sudo apt-get install -y build-essential bison flex libxml2-dev libipc-run-perl
+      - name: Build
+        run: |
+          ./configure --prefix="$PWD/inst" --enable-cassert --enable-debug --enable-tap-tests --without-icu --without-readline --with-libxml --without-zstd --without-lz4 > configure.log 2>&1
+          make -j4 > build.log 2>&1
+          make install > install.log 2>&1
+      - name: Ivy OUT regression
+        run: make -C src/interfaces/libpq check PROVE_TESTS=t/007_ivy_out.pl
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: verification-logs
+          path: |
+            configure.log
+            build.log
+            install.log
+            config.log
+            **/regression.diffs
+            **/regression.out
+            **/tmp_check/log/**
+            **/tmp_check/logs/**
+            **/tmp_check/portlock/**
