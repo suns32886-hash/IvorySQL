@@ -27,7 +27,7 @@ jobs:
           set -e
           cat baseline-test.log
           test "$status" -ne 0
-          grep -E 'got: (11|139)' baseline-test.log
+          grep -E 'got:.*(11|139)' baseline-test.log
           cp "$RUNNER_TEMP/ivy-fixed.c" src/interfaces/libpq/ivy-exec.c
       - name: Fixed Ivy OUT regression
         run: make -C src/interfaces/libpq check PROVE_TESTS=t/007_ivy_out.pl PROVE_FLAGS=--verbose > fixed-test.log 2>&1 || { cat fixed-test.log; exit 1; }
@@ -80,7 +80,7 @@ jobs:
           meson setup meson-build --auto-features=disabled -Dtap_tests=enabled -Duuid=e2fs -Dlibxml=enabled > meson-setup.log 2>&1
           ninja -C meson-build -j4 > meson-build.log 2>&1
       - name: Meson libpq suites
-        run: meson test -C meson-build --suite libpq --print-errorlogs > meson-test.log 2>&1 || { cat meson-test.log; exit 1; }
+        run: meson test -C meson-build --suite setup --suite libpq --print-errorlogs > meson-test.log 2>&1 || { cat meson-test.log; exit 1; }
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -88,3 +88,4 @@ jobs:
           path: |
             meson-*.log
             meson-build/meson-logs/**
+

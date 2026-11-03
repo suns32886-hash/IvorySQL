@@ -29,7 +29,7 @@ test_ivy_out(const char *conninfo, const char *api, const char *input)
 	char		errmsg[256] = {0};
 	int			indicator = 0;
 	Oid			type = 25;		/* text */
-	Ivyargmode mode = argmode_in;
+	Ivyargmode	mode = argmode_in;
 	int			rc = 1;
 
 	if (Ivystatus(conn) != CONNECTION_OK)
@@ -49,7 +49,7 @@ test_ivy_out(const char *conninfo, const char *api, const char *input)
 			!IvyHandleAlloc(NULL, (void **) &error, IVY_HANDLE_ERROR, 0, NULL) ||
 			!IvyStmtPrepare(stmt, error, query, strlen(query), 0, 0) ||
 			!IvyBindByPos(stmt, &bind, error, 1, buffer, sizeof(buffer),
-						 25 | 0x20000000, &indicator, NULL, NULL, 0, NULL, 0))
+						  25 | 0x20000000, &indicator, NULL, NULL, 0, NULL, 0))
 			goto done;
 		result = IvyStmtExecute2(conn, stmt, error, &host);
 	}
@@ -58,10 +58,10 @@ test_ivy_out(const char *conninfo, const char *api, const char *input)
 		stmt = IvyCreatePreparedStatement("ivy_out", query, 1, &type);
 		if (stmt == NULL ||
 			!IvybindOutParameterByPos(stmt, &bind, 1, buffer, sizeof(buffer),
-									&indicator, 0, errmsg, sizeof(errmsg)))
+									  &indicator, 0, errmsg, sizeof(errmsg)))
 			goto done;
 		result = IvyexecPreparedStatement(conn, stmt, 1, &input, NULL, NULL,
-										 &mode, 0, errmsg, sizeof(errmsg));
+										  &mode, 0, errmsg, sizeof(errmsg));
 	}
 
 	if (IvyresultStatus(result) != PGRES_TUPLES_OK)
