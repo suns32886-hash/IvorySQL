@@ -11,6 +11,70 @@
 #include "postgres_fe.h"
 
 #include "libpq-fe.h"
+#include "libpq-ivy.h"
+
+/* Exercise OUT bindings with an empty result, a NULL, or an ordinary value. */
+static int
+test_ivy_out(const char *conninfo, const char *api, const char *input)
+{
+	const char *query =
+		"SELECT CASE WHEN $1 = 'null' THEN NULL::text "
+		"ELSE 'returned'::text END AS \"_column_1\" WHERE $1 <> 'empty'";
+	Ivyconn    *conn = Ivyconnectdb(conninfo);
+	IvyPreparedStatement *stmt = NULL;
+	IvyBindInfo *bind = NULL;
+	IvyError   *error = NULL;
+	Ivyresult  *result = NULL;
+	char		buffer[32] = {0};
+	char		errmsg[256] = {0};
+	int			indicator = 0;
+	Oid			type = 25;		/* text */
+	Ivyargmode mode = argmode_in;
+	int			rc = 1;
+
+	if (Ivystatus(conn) != CONNECTION_OK)
+		goto done;
+	strlcpy(buffer, input, sizeof(buffer));
+
+	if (strcmp(api, "typed") == 0)
+	{
+		if (!IvyHandleAlloc(NULL, (void **) &stmt, IVY_HANDLE_STMT, 0, NULL) ||
+			!IvyHandleAlloc(NULL, (void **) &error, IVY_HANDLE_ERROR, 0, NULL) ||
+			!IvyStmtPrepare(stmt, error, query, strlen(query), 0, 0) ||
+			!IvyBindByPos(stmt, &bind, error, 1, buffer, sizeof(buffer),
+						 25 | 0x20000000, &indicator, NULL, NULL, 0, NULL, 0))
+			goto done;
+		result = IvyStmtExecute(conn, stmt, error);
+	}
+	else
+	{
+		stmt = IvyCreatePreparedStatement("ivy_out", query, 1, &type);
+		if (stmt == NULL ||
+			!IvybindOutParameterByPos(stmt, &bind, 1, buffer, sizeof(buffer),
+									&indicator, 0, errmsg, sizeof(errmsg)))
+			goto done;
+		result = IvyexecPreparedStatement(conn, stmt, 1, &input, NULL, NULL,
+										 &mode, 0, errmsg, sizeof(errmsg));
+	}
+
+	if (IvyresultStatus(result) != PGRES_TUPLES_OK)
+		goto done;
+	printf("rows=%d indicator=%d value=%s\n",
+		   Ivyntuples(result), indicator, buffer);
+	rc = 0;
+
+done:
+	if (rc != 0)
+		fprintf(stderr, "%s%s%s", IvyerrorMessage(conn), errmsg,
+				error != NULL ? error->error_msg : "");
+	Ivyclear(result);
+	if (stmt != NULL)
+		IvyFreePreparedStatement(stmt);
+	if (error != NULL)
+		IvyFreeHandle(error, IVY_HANDLE_ERROR);
+	Ivyfinish(conn);
+	return rc;
+}
 
 static void
 print_ssl_library(void)
@@ -26,6 +90,9 @@ print_ssl_library(void)
 int
 main(int argc, char *argv[])
 {
+	if (argc == 5 && strcmp(argv[1], "--ivy-out") == 0)
+		return test_ivy_out(argv[2], argv[3], argv[4]);
+
 	if ((argc > 1) && !strcmp(argv[1], "--ssl"))
 	{
 		print_ssl_library();
